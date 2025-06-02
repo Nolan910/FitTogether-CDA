@@ -9,7 +9,8 @@ const userSchema = mongoose.Schema({
     isAdmin: {type: Boolean, default: false},
     bio: {type: String, max: 1024},
     location: {type: String, required: true},
-    notes: {type: Array, default: []},
+    // notes: {type: Array, default: []},
+    partenaires: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 }, {collection: 'Users'});
 
 module.exports = mongoose.model('User', userSchema);
