@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const User = require("./models/users");
 const Poste = require("./models/poste");
@@ -33,6 +34,10 @@ mongoose.connect(process.env.MONGO_URL)
 
 //Get
 
+app.get('/test', (req, res) => {
+  res.json({ message: 'CORS fonctionne !' });
+});
+
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
 });
@@ -44,7 +49,7 @@ app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
         const user = await User.findById(idUser);
         res.status(200).json(user);
     } catch(err) {
-        res.status(500).send("Erreur lors de la récupération de l'utilisateur :" + err)
+        res.status(500).json({ error: "Erreur lors de la récupération de l'utilisateur :", details: err.toString() });
     }
 })
 
@@ -55,7 +60,7 @@ app.get('/poste/user/:id', [ rateLimitMiddleware], async (req, res) => {
 
         res.status(200).json(poste);
     } catch (err) {
-        res.status(500).send("Erreur lors de la récupération des postes : " + err);
+        res.status(500).json({ error: "Erreur lors de la récupération des postes : ", details: err.toString() });
     }
 });
 
@@ -68,13 +73,15 @@ app.get('/user/:id/partenaires', [ rateLimitMiddleware], async (req, res) => {
 
         res.status(200).json(user.partenaires);
     } catch (err) {
-        res.status(500).send("Erreur lors de la récupération des partenaires : " + err);
+        res.status(500).json({ error: "Erreur lors de la récupération des partenaires : ", details: err.toString() });
     }
 });
 
+// Post
+
 app.post('/createUser', rateLimitMiddleware, async (req, res) => {
     try {
-      const { nom, email, password, profilPic, level, isAdmin, bio, location } = req.body;
+      const { name, email, password, level, bio, location } = req.body;
   
       const existingUser = await User.findOne({ email });
       if (existingUser) {
@@ -84,21 +91,28 @@ app.post('/createUser', rateLimitMiddleware, async (req, res) => {
       const hashedPassword = await bcrypt.hash(password, 10);
   
       const newUser = new User({
-        nom,
+        name,
         email,
         password: hashedPassword,
-        profilPic,
         level,
-        isAdmin,
+        isAdmin: false,
         bio,
         location,
+        partenaires: [],
       });
   
       await newUser.save();
+
+      const token = jwt.sign(
+      { userId: newUser._id, email: newUser.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+
       res.status(201).json({ message: "Utilisateur créé avec succès !" });
     } catch (err) {
       console.error(err);
-      res.status(500).send("Erreur lors de la création de l'utilisateur : " + err);
+      res.status(500).json({ error: "Erreur lors de la création de l'utilisateur : ", details: err.toString() });
     }
   });
 
@@ -116,9 +130,34 @@ app.post('/createPoste', [ rateLimitMiddleware], async (req, res) => {
         await newPoste.save();
         res.status(201).json(newPoste);
     } catch (err) {
-        res.status(500).send("Erreur lors de la création du poste : " + err);
+        res.status(500).json({ error: "Erreur lors de la création du poste : ", details: err.toString() });
     }
 });
+
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(401).json({ message: "Email ou mot de passe incorrect." });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Email ou mot de passe incorrect." });
+    }
+
+    const token = jwt.sign({ userId: user._id }, 'TON_SECRET', { expiresIn: '1d' });
+
+    res.json({ message: "Connexion réussie !", token, user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Erreur serveur." });
+  }
+});
+
 
 app.post('/user/:id/demande-partenaire', [ rateLimitMiddleware], async (req, res) => {
     try {
@@ -134,7 +173,7 @@ app.post('/user/:id/demande-partenaire', [ rateLimitMiddleware], async (req, res
         await demande.save();
         res.status(201).json({ message: "Demande envoyée." });
     } catch (err) {
-        res.status(500).send("Erreur lors de l'envoi de la demande : " + err);
+        res.status(500).json({ error: "Erreur lors de l'envoi de la demande :", details: err.toString() });
     }
 });
 
@@ -156,9 +195,11 @@ app.post('/user/:id/accepter-partenaire', [ rateLimitMiddleware], async (req, re
 
         res.status(200).json({ message: "Demande acceptée, vous êtes maintenant partenaires !" });
     } catch (err) {
-        res.status(500).send("Erreur lors de l'acceptation de la demande : " + err);
+        res.status(500).json({ error: "Erreur lors de l'acceptation de la demande : ", details: err.toString() });
     }
 });
+
+//Put
 
 app.put('/user/update', [ rateLimitMiddleware], async (req, res) => {
     try {
@@ -177,9 +218,11 @@ app.put('/user/update', [ rateLimitMiddleware], async (req, res) => {
 
         res.status(200).json(updatedUser);
     } catch (err) {
-        res.status(500).send("Erreur lors de la mise à jour du profil : " + err);
+        res.status(500).json({ error: "Erreur lors de la mise à jour du profil : ", details: err.toString() });
     }
 });
+
+// Delete
 
 app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
     try{
@@ -194,12 +237,12 @@ app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
         await DemandePartenaire.deleteMany({ $or: [{ from: userId }, { to: userId }] });
 
         if(!deleteUser){
-            return res.status(500).send("Erreur lors de la suppression de l'utilisateur : impossible de supprimer l'utilisateur");
+            res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
         }
 
         res.status(200).json(deleteUser);
     } catch(err){
-        res.status(500).send("Erreur lors de la suppression de l'utilisateur :" + err)
+        res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
     }
 })
 
@@ -217,7 +260,7 @@ app.delete('/deletePoste/:id', [ rateLimitMiddleware], async (req, res) => {
         await poste.deleteOne();
         res.status(200).json({ message: "Poste supprimé." });
     } catch (err) {
-        res.status(500).send("Erreur lors de la suppression du poste : " + err);
+        res.status(500).json({ error: "Erreur lors de la suppression du poste :", details: err.toString() });
     }
 });
 
@@ -231,7 +274,7 @@ app.delete('/deleteUser', [ rateLimitMiddleware], async (req, res) => {
 
         res.status(200).json({ message: "Compte supprimé avec succès." });
     } catch (err) {
-        res.status(500).send("Erreur lors de la suppression du compte : " + err);
+        res.status(500).json({ error: "Erreur lors de la suppression du compte : ", details: err.toString() });
     }
 });
 
@@ -268,12 +311,12 @@ app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
         await Cars.deleteMany({IdOwner: idUser});
 
         if(!deleteUser){
-            return res.status(500).send("Erreur lors de la suppression de l'utilisateur : impossible de supprimer l'utilisateur");
+            res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
         }
 
         res.status(200).json(deleteUser);
     } catch(err){
-        res.status(500).send("Erreur lors de la suppression de l'utilisateur :" + err)
+        res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
     }
 })
 
