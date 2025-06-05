@@ -5,9 +5,11 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
 
 const User = require("./models/users");
-const Poste = require("./models/poste");
+const Poste = require("./models/post.js");
 const DemandePartenaire = require("./models/demandePartenaire");
 
 const rateLimitMiddleware = require('./Middleware/limiter.js');
@@ -23,12 +25,26 @@ app.use(cors({
   }));
 app.use(express.json());
 app.use(express.static('public'));
+app.use('/uploads', express.static('uploads'));
+
 
 mongoose.connect(process.env.MONGO_URL)
     .then(() => console.log('Connexion à MongoDB réussie !'))
     .catch((err) => console.log('Connexion à MongoDB échouée : ', err));
 
 
+// Multer configuration for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage });
 
 // Routes
 
@@ -117,21 +133,32 @@ app.post('/createUser', rateLimitMiddleware, async (req, res) => {
   });
 
 
-app.post('/createPoste', [ rateLimitMiddleware], async (req, res) => {
+app.post('/createPoste', upload.single('image'), [ rateLimitMiddleware], async (req, res) => {
+    console.log('Requête reçue, body:', req.body);
     try {
-        const { url, caption, createdAt } = req.body; 
-        const newPoste = new Poste({
-            url,
-            caption,
-            owner: req.userId,
-            createdAt
-        });
-
-        await newPoste.save();
-        res.status(201).json(newPoste);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la création du poste : ", details: err.toString() });
+    const { description, author } = req.body;
+    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    
+    if (!description || !author || !imageUrl) {
+      // Supprime l'image si post échoue
+      if (req.file) {
+        fs.unlinkSync(path.join(__dirname, 'uploads', req.file.filename));
+      }
+      return res.status(400).json({ message: "Champs requis manquants." });
     }
+
+    const newPost = new Poste({
+        description,
+        imageUrl,
+        author
+    });
+
+    await newPost.save();
+    res.status(201).json({ message: 'Post créé avec succès.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors de la création du post." });
+  }
 });
 
 app.post('/login', async (req, res) => {
@@ -149,9 +176,21 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ message: "Email ou mot de passe incorrect." });
     }
 
-    const token = jwt.sign({ userId: user._id }, 'TON_SECRET', { expiresIn: '1d' });
+    const token = jwt.sign({ userId: user._id }, 'JWT_SECRET', { expiresIn: '1d' });
 
-    res.json({ message: "Connexion réussie !", token, user });
+    res.status(200).json({
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        level: user.level,
+        location: user.location,
+        bio: user.bio,
+        profilPic: user.profilPic,
+        isAdmin: user.isAdmin
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Erreur serveur." });

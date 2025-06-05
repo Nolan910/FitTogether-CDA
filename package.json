@@ -1,5 +1,5 @@
 {
-  "name": "hackathon-api",
+  "name": "fittogether-cda",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -9,14 +9,14 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/BaptisteMathon/Hackathon_API.git"
+    "url": "git+https://github.com/Nolan910/FitTogether-CDA.git"
   },
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/BaptisteMathon/Hackathon_API/issues"
+    "url": "https://github.com/Nolan910/FitTogether-CDA/issues"
   },
-  "homepage": "https://github.com/BaptisteMathon/Hackathon_API#readme",
+  "homepage": "https://github.com/Nolan910/FitTogether-CDA#readme",
   "dependencies": {
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.2",
@@ -26,6 +26,7 @@
     "express-rate-limit": "^7.5.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
+    "multer": "^2.0.1",
     "vercel": "^41.4.1"
   },
   "devDependencies": {
