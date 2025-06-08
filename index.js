@@ -6,12 +6,14 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const cloudinary = require('cloudinary').v2;
 const path = require('path');
 
 const User = require("./models/users");
 const Poste = require("./models/post.js");
 const Comment = require("./models/comment.js");
-const DemandePartenaire = require("./models/demandePartenaire");
+const PartnerRequest = require("./models/partner_request.js");
+const { upload } = require('./config/cloudinary');
 
 const rateLimitMiddleware = require('./Middleware/limiter.js');
 
@@ -35,17 +37,24 @@ mongoose.connect(process.env.MONGO_URL)
 
 
 // Multer configuration for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
+// const storage = multer.diskStorage({
+//   destination: (req, file, cb) => {
+//     cb(null, 'uploads/');
+//   },
+//   filename: (req, file, cb) => {
+//     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+//     cb(null, uniqueSuffix + path.extname(file.originalname));
+//   }
+// });
 
-const upload = multer({ storage });
+// const upload = multer({ storage });
+
+// console.log('Cloudinary config:', {
+//   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+//   api_key: process.env.CLOUDINARY_API_KEY,
+//   api_secret: process.env.CLOUDINARY_API_SECRET ? '✔️' : '❌'
+// });
+
 
 // Routes
 
@@ -61,13 +70,24 @@ app.get('/', (req, res) => {
 
 //[authJwt.verifyToken,authJwt.isExist, rateLimitMiddleware]
 app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
-    try{
-        const idUser = req.params.id;
-        const user = await User.findById(idUser);
-        res.status(200).json(user);
-    } catch(err) {
-        res.status(500).json({ error: "Erreur lors de la récupération de l'utilisateur :", details: err.toString() });
+    try {
+    const idUser = req.params.id;
+    // console.log("Demande du profil pour l'ID :", idUser); // Debug
+
+    const user = await User.findById(idUser);
+    
+    if (!user) {
+      return res.status(404).json({ error: "Utilisateur non trouvé." });
     }
+
+    res.status(200).json(user);
+  } catch (err) {
+    console.error("Erreur de récupération :", err);
+    res.status(500).json({ 
+      error: "Erreur lors de la récupération de l'utilisateur",
+      details: err.message,
+    });
+  }
 })
 
 app.get('/posts', async (req, res) => {
@@ -83,28 +103,66 @@ app.get('/posts', async (req, res) => {
   }
 });
 
-app.get('/poste/user/:id', [ rateLimitMiddleware], async (req, res) => {
-    try {
-        const userId = req.params.id;
-        const poste = await Poste.find({ owner: userId });
+// app.get('/poste/user/:id', [ rateLimitMiddleware], async (req, res) => {
+//     try {
+//         const userId = req.params.id;
+//         const poste = await Poste.find({ owner: userId });
 
-        res.status(200).json(poste);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la récupération des postes : ", details: err.toString() });
-    }
+//         res.status(200).json(poste);
+//     } catch (err) {
+//         res.status(500).json({ error: "Erreur lors de la récupération des postes : ", details: err.toString() });
+//     }
+// });
+
+app.get('/user/:id/posts', async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: "Utilisateur introuvable" });
+
+    const posts = await Poste.find({ author: userId })
+      .populate('author', 'name profilPic') 
+      .sort({ createdAt: -1 });
+
+    res.json(posts);
+  } catch (err) {
+    console.error("Erreur lors de la récupération des posts utilisateur:", err);
+    res.status(500).json({ message: "Erreur serveur lors de la récupération des posts" });
+  }
 });
 
-app.get('/user/:id/partenaires', [ rateLimitMiddleware], async (req, res) => {
+app.get('/user/:id/partners', [ rateLimitMiddleware], async (req, res) => {
     try {
-        const userId = req.params.id;
-        const user = await User.findById(userId).populate('partenaires', '-password');
-        // const idUser = req.params.id;
-        // const user = await User.findById(idUser);
+    const requests = await PartnerRequest.find({ 
+      status: 'accepted', 
+      $or: [
+        { from: req.params.id }, 
+        { to: req.params.id }
+      ]
+    }).populate('from to', 'name profilPic');
 
-        res.status(200).json(user.partenaires);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la récupération des partenaires : ", details: err.toString() });
-    }
+    const partners = requests.map(req => {
+      // Retourne l’autre utilisateur (pas celui qui consulte)
+      return req.from._id.toString() === req.params.id ? req.to : req.from;
+    });
+
+    res.json(partners);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors du chargement des partenaires." });
+  }
+});
+
+app.get('/user/:id/partner-requests', [ rateLimitMiddleware], async (req, res) => {
+  try {
+    const requests = await PartnerRequest.find({ to: req.params.id })
+      .populate('from', 'name profilPic');
+    res.json(requests);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors du chargement des demandes." });
+  }
 });
 
 app.get('/post/:id', async (req, res) => {
@@ -166,33 +224,93 @@ app.post('/createUser', rateLimitMiddleware, async (req, res) => {
   });
 
 
-app.post('/createPoste', upload.single('image'), [ rateLimitMiddleware], async (req, res) => {
-    console.log('Requête reçue, body:', req.body);
-    try {
-    const { description, author } = req.body;
-    const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
-    
+app.post('/createPoste', [ rateLimitMiddleware], async (req, res) => {
+  
+  try {
+    const { description, author, imageUrl } = req.body;
+
+    // console.log("Contenu reçu :", req.body);
+
     if (!description || !author || !imageUrl) {
-      // Supprime l'image si post échoue
-      if (req.file) {
-        fs.unlinkSync(path.join(__dirname, 'uploads', req.file.filename));
-      }
-      return res.status(400).json({ message: "Champs requis manquants." });
+      return res.status(400).json({ message: 'Champs manquants.' });
     }
 
+    // Upload vers Cloudinary
+    // const result = await cloudinary.uploader.upload(req.file.path, {
+    //   folder: 'FitTogether',
+    // });
+
+    // const imageUrl = result.secure_url;
+
     const newPost = new Poste({
-        description,
-        imageUrl,
-        author,
-        comments: []
+      description,
+      author,
+      imageUrl,
+      comments: [],
     });
 
     await newPost.save();
-    res.status(201).json({ message: 'Post créé avec succès.' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Erreur lors de la création du post." });
+    res.status(201).json(newPost);
+  } catch (error) {
+    console.error("Erreur lors de la création du post :", error);
+    res.status(500).json({ message: "Erreur lors de la création du post" });
   }
+  
+  
+  // try {
+  //   const { description, author, imageUrl } = req.body;
+  //   console.log("Contenu reçu :", req.body);
+
+  //   // const imageUrl = req.file.path; // Cloudinary retourne déjà l'URL
+
+  //   if (!description || !author || !imageUrl) {
+  //     return res.status(400).json({ message: 'Champs manquants.' });
+  //   }
+
+  //   const newPost = new Poste({
+  //     description,
+  //     author,
+  //     imageUrl,
+  //     comments: [],
+  //     // createdAt: new Date(),
+  //   });
+
+  //   await newPost.save();
+  //   res.status(201).json(newPost);
+  // } catch (error) {
+  //   console.error("Erreur lors de la création du post :", error);
+  //   res.status(500).json({ message: "Erreur lors de la création du post" });
+  // }
+
+
+
+
+  //   console.log('Requête reçue, body:', req.body);
+  //   try {
+  //   const { description, author } = req.body;
+  //   const imageUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    
+  //   if (!description || !author || !imageUrl) {
+  //     // Supprime l'image si post échoue
+  //     if (req.file) {
+  //       fs.unlinkSync(path.join(__dirname, 'uploads', req.file.filename));
+  //     }
+  //     return res.status(400).json({ message: "Champs requis manquants." });
+  //   }
+
+  //   const newPost = new Poste({
+  //       description,
+  //       imageUrl,
+  //       author,
+  //       comments: []
+  //   });
+
+  //   await newPost.save();
+  //   res.status(201).json({ message: 'Post créé avec succès.' });
+  // } catch (err) {
+  //   console.error(err);
+  //   res.status(500).json({ message: "Erreur lors de la création du post." });
+  // }
 });
 
 app.post('/login', async (req, res) => {
@@ -210,7 +328,7 @@ app.post('/login', async (req, res) => {
       return res.status(401).json({ message: "Email ou mot de passe incorrect." });
     }
 
-    const token = jwt.sign({ userId: user._id }, 'JWT_SECRET', { expiresIn: '1d' });
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '4h' });
 
     res.status(200).json({
       token,
@@ -222,7 +340,8 @@ app.post('/login', async (req, res) => {
         location: user.location,
         bio: user.bio,
         profilPic: user.profilPic,
-        isAdmin: user.isAdmin
+        isAdmin: user.isAdmin,
+        partners: user.partners
       }
     });
   } catch (error) {
@@ -265,28 +384,49 @@ app.post('/post/:id/comment', async (req, res) => {
   }
 });
 
-app.post('/user/:id/demande-partenaire', [ rateLimitMiddleware], async (req, res) => {
+app.post('/user/:id/request-partner', [ rateLimitMiddleware], async (req, res) => {
+  const { from, to } = req.body;
+  console.log('Requête de partenariat reçue avec :', req.body);
+
   try {
-    const postId = req.params.id;
-    const { content, authorId } = req.body;
+    // const targetUserId = req.params.id;
+    // const requesterId = req.user.userId; // supposé décodé via middleware
 
-    const newComment = new Comment({
-      author: authorId,
-      post: postId,
-      content
-    });
+    const existing = await PartnerRequest.findOne({ from, to, status: 'pending' });
+    if (existing) {
+      return res.status(409).json({ message: "Demande déjà envoyée." });
+    }
+   
+    const request = new PartnerRequest({ from, to });
+    await request.save();
 
-    await newComment.save();
-
-    await Poste.findByIdAndUpdate(postId, {
-      $push: { comments: newComment._id }
-    });
-
-    res.status(201).json({ message: "Commentaire ajouté", comment: newComment });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Erreur serveur" });
+    res.status(201).json({ message: "Demande envoyée.", request });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors de l'envoi de la demande." });
   }
+  
+  // try {
+  //   const postId = req.params.id;
+  //   const { content, authorId } = req.body;
+
+  //   const newComment = new Comment({
+  //     author: authorId,
+  //     post: postId,
+  //     content
+  //   });
+
+  //   await newComment.save();
+
+  //   await Poste.findByIdAndUpdate(postId, {
+  //     $push: { comments: newComment._id }
+  //   });
+
+  //   res.status(201).json({ message: "Commentaire ajouté", comment: newComment });
+  // } catch (error) {
+  //   console.error(error);
+  //   res.status(500).json({ message: "Erreur serveur" });
+  // }
 });
 
 app.post('/user/:id/accepter-partenaire', [ rateLimitMiddleware], async (req, res) => {
@@ -313,25 +453,81 @@ app.post('/user/:id/accepter-partenaire', [ rateLimitMiddleware], async (req, re
 
 //Put
 
-app.put('/user/update', [ rateLimitMiddleware], async (req, res) => {
-    try {
-        const userId = req.userId; 
-        const allowedFields = ['name', 'password', 'level', 'bio', 'profilPic', 'location'];
-        const updateData = {};
-        for (let field of allowedFields) {
-            if (req.body[field] !== undefined) updateData[field] = req.body[field];
-        }
-        
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            { $set: updateData },
-            { new: true, runValidators: true }
-        );
+app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
+  try {
+    const { name } = req.body;
+    const userId = req.params.id;
 
-        res.status(200).json(updatedUser);
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la mise à jour du profil : ", details: err.toString() });
+    console.log('req.body:', req.body);
+  console.log('req.file:', req.file); 
+
+    
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (req.file && req.file.path) {
+      const cloudinaryResult = await cloudinary.uploader.upload(req.file.path, {
+        folder: 'FitTogether',
+      });
+      updateData.profilPic = cloudinaryResult.secure_url; // URL Cloudinary
     }
+
+    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
+      new: true,
+    });
+
+    res.json(updatedUser);
+  } catch (err) {
+    console.error("Erreur de mise à jour :", err);
+    res.status(500).json({ message: "Erreur lors de la mise à jour." });
+  }
+});
+
+app.put('/partner-requests/:id', async (req, res) => {
+  try {
+    const { status } = req.body;
+
+    const request = await PartnerRequest.findById(req.params.id);
+    if (!request) return res.status(404).json({ message: "Demande non trouvée" });
+
+    request.status = status;
+    await request.save();
+
+    if (status === 'accepted') {
+
+      // Ajouter les partenaires mutuellement
+      await User.findByIdAndUpdate(request.from, {
+        $addToSet: { partners: request.to }
+      });
+
+      await User.findByIdAndUpdate(request.to, {
+        $addToSet: { partners: request.from }
+      });
+    }
+
+    const updatedRequest = await PartnerRequest.findById(req.params.id).populate('from', 'name profilPic');
+
+    res.json({
+      message: `Demande ${status === 'accepted' ? 'acceptée' : 'refusée'}.`,
+      request: updatedRequest
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors de la mise à jour de la demande." });
+  }
+  // try {
+  //   const { status } = req.body; 
+
+  //   const updatedRequest = await PartnerRequest.findByIdAndUpdate(
+  //     req.params.id,
+  //     { status },
+  //     { new: true }
+  //   ).populate('from', 'name profilPic');
+
+  //   res.json({ message: `Demande ${status === 'accepted' ? 'acceptée' : 'refusée'}.`, request: updatedRequest });
+  // } catch (err) {
+  //   console.error(err);
+  //   res.status(500).json({ message: "Erreur lors de la mise à jour de la demande." });
+  // }
 });
 
 // Delete
@@ -359,22 +555,20 @@ app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
 })
 
 
-app.delete('/deletePoste/:id', [ rateLimitMiddleware], async (req, res) => {
-    try {
-        const posteId = req.params.id;
-        const userId = req.userId;
+app.delete('/post/:id', async (req, res) => {
+  try {
+    const post = await Poste.findById(req.params.id);
 
-        const poste = await Poste.findById(posteId);
+    if (!post) return res.status(404).json({ message: 'Post non trouvé.' });
 
-        if (!poste) return res.status(404).send("Poste non trouvé.");
-        if (poste.owner.toString() !== userId) return res.status(403).send("Non autorisé à supprimer ce poste.");
-
-        await poste.deleteOne();
-        res.status(200).json({ message: "Poste supprimé." });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la suppression du poste :", details: err.toString() });
-    }
+    await post.deleteOne();
+    res.json({ message: 'Post supprimé avec succès.' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur lors de la suppression du post." });
+  }
 });
+
 
 app.delete('/deleteUser', [ rateLimitMiddleware], async (req, res) => {
     try {
