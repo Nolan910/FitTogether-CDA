@@ -23,8 +23,13 @@ const rateLimitMiddleware = require('./Middleware/limiter.js');
 
 dotenv.config();
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://fit-together-lake.vercel.app'
+];
+
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: allowedOrigins,
     credentials: true
   }));
 app.use(express.json());
