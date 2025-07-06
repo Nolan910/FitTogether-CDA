@@ -9,7 +9,6 @@ const userSchema = mongoose.Schema({
     isAdmin: {type: Boolean, default: false},
     bio: {type: String, max: 1024},
     location: {type: String, required: true},
-    // notes: {type: Array, default: []},
     partners: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     receivedRequests: [{from: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, date: { type: Date, default: Date.now }}]
 }, {collection: 'Users'});

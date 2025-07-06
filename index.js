@@ -15,11 +15,7 @@ const Comment = require("./models/comment.js");
 const PartnerRequest = require("./models/partner_request.js");
 const Message = require("./models/message.js");
 const { upload } = require('./config/cloudinary');
-
 const rateLimitMiddleware = require('./Middleware/limiter.js');
-
-// const authcontroller = require('./controllers/authcontroller');
-// const authJwt = require("./Middleware/authJwt.js");
 
 dotenv.config();
 
@@ -42,7 +38,7 @@ mongoose.connect(process.env.MONGO_URL)
     .catch((err) => console.log('Connexion à MongoDB échouée : ', err));
 
 
-
+    
 // Routes
 
 //Get
@@ -55,7 +51,6 @@ app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
 });
 
-//[authJwt.verifyToken,authJwt.isExist, rateLimitMiddleware]
 app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
     try {
     const idUser = req.params.id;
@@ -174,7 +169,10 @@ app.get('/messages/:user1/:user2', async (req, res) => {
         { from: user1, to: user2 },
         { from: user2, to: user1 }
       ]
-    }).sort({ timestamp: 1 });
+    })
+    .sort({ timestamp: 1 })
+    .populate('from', 'name profilPic')
+    .populate('to', 'name profilPic');
 
     res.json(messages);
   } catch (err) {
@@ -229,8 +227,12 @@ app.post('/createPoste', [ rateLimitMiddleware], async (req, res) => {
   try {
     const { description, author, imageUrl } = req.body;
 
-    if (!description || !author || !imageUrl) {
-      return res.status(400).json({ message: 'Champs manquants.' });
+    if (!description || !imageUrl) {
+      return res.status(400).json({ message: 'Champs manquants' });
+    }
+
+    if (!author) {
+      return res.status(400).json({ message: 'Veuillez vous connectez' });
     }
 
     const newPost = new Poste({
@@ -289,28 +291,21 @@ app.post('/login', async (req, res) => {
 app.post('/post/:id/comment', async (req, res) => {
   const { id } = req.params;
   const { content, authorId } = req.body;
-
   if (!content || !authorId) {
     return res.status(400).json({ message: 'Contenu et auteur requis' });
   }
-
   try {
     const post = await Poste.findById(id);
     if (!post) return res.status(404).json({ message: 'Post non trouvé' });
-
     const comment = new Comment({
       content,
       author: authorId,
       post: id,
       createdAt: new Date()
     });
-
     await comment.save();
-
     post.comments.push(comment._id);
-
     await post.save();
-
     const populatedComment = await Comment.findById(comment._id).populate('author');
 
     res.status(201).json({ comment: populatedComment });
@@ -388,15 +383,15 @@ app.post('/messages', async (req, res) => {
 
 app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, bio, level, location } = req.body;
     const userId = req.params.id;
 
-    console.log('req.body:', req.body);
-  console.log('req.file:', req.file); 
-
-    
     const updateData = {};
     if (name) updateData.name = name;
+    if (bio) updateData.bio = bio;
+    if (level) updateData.level = level;
+    if (location) updateData.location = location;
+
     if (req.file && req.file.path) {
       const cloudinaryResult = await cloudinary.uploader.upload(req.file.path, {
         folder: 'FitTogether',
@@ -404,11 +399,11 @@ app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
       updateData.profilPic = cloudinaryResult.secure_url; // URL Cloudinary
     }
 
-    const updatedUser = await User.findByIdAndUpdate(userId, updateData, {
-      new: true,
-    });
+    // Mise à jour de l'utilisateur avec les données fournies
+    await User.findByIdAndUpdate(userId, { $set: updateData }, { runValidators: true });
+    const refreshedUser = await User.findById(userId);
 
-    res.json(updatedUser);
+    res.json(refreshedUser);
   } catch (err) {
     console.error("Erreur de mise à jour :", err);
     res.status(500).json({ message: "Erreur lors de la mise à jour." });
@@ -418,27 +413,22 @@ app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
 app.put('/partner-requests/:id', async (req, res) => {
   try {
     const { status } = req.body;
-
     const request = await PartnerRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ message: "Demande non trouvée" });
-
     request.status = status;
     await request.save();
 
     if (status === 'accepted') {
-
-      // Ajouter les partenaires mutuellement
+      // Ajoute les partenaires mutuellement
       await User.findByIdAndUpdate(request.from, {
         $addToSet: { partners: request.to }
       });
-
       await User.findByIdAndUpdate(request.to, {
         $addToSet: { partners: request.from }
       });
     }
 
     const updatedRequest = await PartnerRequest.findById(req.params.id).populate('from', 'name profilPic');
-
     res.json({
       message: `Demande ${status === 'accepted' ? 'acceptée' : 'refusée'}.`,
       request: updatedRequest
@@ -447,7 +437,6 @@ app.put('/partner-requests/:id', async (req, res) => {
     console.error(err);
     res.status(500).json({ message: "Erreur lors de la mise à jour de la demande." });
   }
-
 });
 
 // Delete
@@ -519,13 +508,7 @@ app.delete('/comments/:id', async (req, res) => {
   }
 });
 
-//Authentification
-
-// app.post("/api/auth/signup", authcontroller.signup);
-// app.post("/api/auth/signin", authcontroller.signin);
-// app.post("/api/auth/signout",authcontroller.signout);
-
-//temporaire
+//Pour test en local
 app.listen(process.env.PORT, () => {
     console.log(`Serveur en écoute sur le port http://localhost:${process.env.PORT}`);
 });
