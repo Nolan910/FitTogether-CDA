@@ -20,12 +20,19 @@ const rateLimitMiddleware = require('./Middleware/limiter.js');
 dotenv.config();
 
 const allowedOrigins = [
-  process.env.ALLOWED_ORIGINS 
+  "http://localhost:5173",
+  "https://fit-together-lake.vercel.app"
 ];
 
 app.use(cors({
-    origin: allowedOrigins,
-    credentials: true
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true
   }));
 app.use(express.json());
 app.use(express.static('public'));
