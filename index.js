@@ -20,8 +20,7 @@ const rateLimitMiddleware = require('./Middleware/limiter.js');
 dotenv.config();
 
 const allowedOrigins = [
-  'http://localhost:5173',
-  'https://fit-together-lake.vercel.app'
+  process.env.ALLOWED_ORIGINS 
 ];
 
 app.use(cors({
@@ -32,11 +31,9 @@ app.use(express.json());
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
 
-
 mongoose.connect(process.env.MONGO_URL)
     .then(() => console.log('Connexion à MongoDB réussie !'))
     .catch((err) => console.log('Connexion à MongoDB échouée : ', err));
-
 
     
 // Routes
@@ -54,6 +51,10 @@ app.get('/', (req, res) => {
 app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
     try {
     const idUser = req.params.id;
+
+    if (!mongoose.Types.ObjectId.isValid(idUser)) {
+      return res.status(400).json({ message: "ID utilisateur invalide" });
+    }
 
     const user = await User.findById(idUser);
     
@@ -143,6 +144,11 @@ app.get('/user/:id/partner-requests', [ rateLimitMiddleware], async (req, res) =
 
 app.get('/post/:id', async (req, res) => {
   try {
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "ID post invalide" });
+    }
+
     const post = await Poste.findById(req.params.id)
       .populate('author')
       .populate({
@@ -184,7 +190,7 @@ app.get('/messages/:user1/:user2', async (req, res) => {
 
 // Post
 
-app.post('/createUser', rateLimitMiddleware, async (req, res) => {
+app.post('/createUser', [ rateLimitMiddleware ], async (req, res) => {
     try {
       const { name, email, password, level, bio, location } = req.body;
   
@@ -320,8 +326,6 @@ app.post('/user/:id/request-partner', [ rateLimitMiddleware], async (req, res) =
   console.log('Requête de partenariat reçue avec :', req.body);
 
   try {
-    // const targetUserId = req.params.id;
-    // const requesterId = req.user.userId; // supposé décodé via middleware
 
     const existing = await PartnerRequest.findOne({ from, to, status: 'pending' });
     if (existing) {
@@ -337,28 +341,6 @@ app.post('/user/:id/request-partner', [ rateLimitMiddleware], async (req, res) =
     res.status(500).json({ message: "Erreur lors de l'envoi de la demande." });
   }
 
-});
-
-app.post('/user/:id/accepter-partenaire', [ rateLimitMiddleware], async (req, res) => {
-    try {
-        const userId = req.userId;
-        const demandeurId = req.params.id;
-
-        const demande = await DemandePartenaire.findOneAndUpdate(
-            { from: demandeurId, to: userId, statut: 'en_attente' },
-            { $set: { statut: 'accepte' } },
-            { new: true }
-        );
-
-        if (!demande) return res.status(404).send("Demande non trouvée.");
-
-        await User.findByIdAndUpdate(userId, { $addToSet: { partenaires: demandeurId } });
-        await User.findByIdAndUpdate(demandeurId, { $addToSet: { partenaires: userId } });
-
-        res.status(200).json({ message: "Demande acceptée, vous êtes maintenant partenaires !" });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de l'acceptation de la demande : ", details: err.toString() });
-    }
 });
 
 app.post('/messages', async (req, res) => {
@@ -399,7 +381,6 @@ app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
       updateData.profilPic = cloudinaryResult.secure_url; // URL Cloudinary
     }
 
-    // Mise à jour de l'utilisateur avec les données fournies
     await User.findByIdAndUpdate(userId, { $set: updateData }, { runValidators: true });
     const refreshedUser = await User.findById(userId);
 
@@ -463,7 +444,6 @@ app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
     }
 })
 
-
 app.delete('/post/:id', async (req, res) => {
   try {
     const post = await Poste.findById(req.params.id);
@@ -477,7 +457,6 @@ app.delete('/post/:id', async (req, res) => {
     res.status(500).json({ message: "Erreur lors de la suppression du post." });
   }
 });
-
 
 app.delete('/deleteUser', [ rateLimitMiddleware], async (req, res) => {
     try {
