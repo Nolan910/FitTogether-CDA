@@ -16,6 +16,10 @@ const PartnerRequest = require("./models/partner_request.js");
 const Message = require("./models/message.js");
 const { upload } = require('./config/cloudinary');
 const rateLimitMiddleware = require('./Middleware/limiter.js');
+const { verifyToken } = require('./Middleware/authJwt.js');
+
+const PUBLIC_USER_FIELDS = 'name profilPic';
+const HIDDEN_USER_FIELDS = '-password -email -receivedRequests';
 
 dotenv.config();
 
@@ -63,8 +67,8 @@ app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
       return res.status(400).json({ message: "ID utilisateur invalide" });
     }
 
-    const user = await User.findById(idUser);
-    
+    const user = await User.findById(idUser).select(HIDDEN_USER_FIELDS);
+
     if (!user) {
       return res.status(404).json({ error: "Utilisateur non trouvé." });
     }
@@ -135,7 +139,11 @@ app.get('/user/:id/partners', [ rateLimitMiddleware], async (req, res) => {
   }
 });
 
-app.get('/user/:id/partner-requests', [ rateLimitMiddleware], async (req, res) => {
+app.get('/user/:id/partner-requests', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+  if (req.params.id !== req.userId) {
+    return res.status(403).json({ message: "Accès refusé." });
+  }
+
   try {
     const requests = await PartnerRequest.find({ 
       to: req.params.id,
@@ -157,10 +165,10 @@ app.get('/post/:id', async (req, res) => {
     }
 
     const post = await Poste.findById(req.params.id)
-      .populate('author')
+      .populate('author', PUBLIC_USER_FIELDS)
       .populate({
         path: 'comments',
-        populate: { path: 'author' }, 
+        populate: { path: 'author', select: PUBLIC_USER_FIELDS },
         options: { sort: { createdAt: -1 } }
       });
 
@@ -235,22 +243,18 @@ app.post('/createUser', [ rateLimitMiddleware ], async (req, res) => {
   });
 
 
-app.post('/createPoste', [ rateLimitMiddleware], async (req, res) => {
-  
+app.post('/createPoste', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+
   try {
-    const { description, author, imageUrl } = req.body;
+    const { description, imageUrl } = req.body;
 
     if (!description || !imageUrl) {
       return res.status(400).json({ message: 'Champs manquants' });
     }
 
-    if (!author) {
-      return res.status(400).json({ message: 'Veuillez vous connectez' });
-    }
-
     const newPost = new Poste({
       description,
-      author,
+      author: req.userId,
       imageUrl,
       comments: [],
     });
@@ -301,25 +305,28 @@ app.post('/login', async (req, res) => {
   }
 });
 
-app.post('/post/:id/comment', async (req, res) => {
+app.post('/post/:id/comment', verifyToken, async (req, res) => {
   const { id } = req.params;
-  const { content, authorId } = req.body;
-  if (!content || !authorId) {
-    return res.status(400).json({ message: 'Contenu et auteur requis' });
+  const { content } = req.body;
+  if (!content) {
+    return res.status(400).json({ message: 'Contenu requis' });
+  }
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ message: "ID post invalide" });
   }
   try {
     const post = await Poste.findById(id);
     if (!post) return res.status(404).json({ message: 'Post non trouvé' });
     const comment = new Comment({
       content,
-      author: authorId,
+      author: req.userId,
       post: id,
       createdAt: new Date()
     });
     await comment.save();
     post.comments.push(comment._id);
     await post.save();
-    const populatedComment = await Comment.findById(comment._id).populate('author');
+    const populatedComment = await Comment.findById(comment._id).populate('author', PUBLIC_USER_FIELDS);
 
     res.status(201).json({ comment: populatedComment });
   } catch (err) {
@@ -328,9 +335,13 @@ app.post('/post/:id/comment', async (req, res) => {
   }
 });
 
-app.post('/user/:id/request-partner', [ rateLimitMiddleware], async (req, res) => {
-  const { from, to } = req.body;
-  console.log('Requête de partenariat reçue avec :', req.body);
+app.post('/user/:id/request-partner', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+  const from = req.userId;
+  const to = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(to)) {
+    return res.status(400).json({ message: "ID utilisateur invalide" });
+  }
 
   try {
 
@@ -350,10 +361,11 @@ app.post('/user/:id/request-partner', [ rateLimitMiddleware], async (req, res) =
 
 });
 
-app.post('/messages', async (req, res) => {
-  const { from, to, content } = req.body;
+app.post('/messages', verifyToken, async (req, res) => {
+  const { to, content } = req.body;
+  const from = req.userId;
 
-  if (!from || !to || !content) {
+  if (!to || !content) {
     return res.status(400).json({ message: "Champs manquants." });
   }
 
@@ -370,10 +382,17 @@ app.post('/messages', async (req, res) => {
 
 //Put
 
-app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
+const isSelf = (req, res, next) => {
+  if (req.params.id !== req.userId) {
+    return res.status(403).json({ message: "Vous ne pouvez modifier que votre propre profil." });
+  }
+  next();
+};
+
+app.put('/user/:id', verifyToken, isSelf, upload.single('profilPic'), async (req, res) => {
   try {
     const { name, bio, level, location } = req.body;
-    const userId = req.params.id;
+    const userId = req.userId;
 
     const updateData = {};
     if (name) updateData.name = name;
@@ -389,7 +408,7 @@ app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
     }
 
     await User.findByIdAndUpdate(userId, { $set: updateData }, { runValidators: true });
-    const refreshedUser = await User.findById(userId);
+    const refreshedUser = await User.findById(userId).select('-password -receivedRequests');
 
     res.json(refreshedUser);
   } catch (err) {
@@ -398,11 +417,29 @@ app.put('/user/:id', upload.single('profilPic'), async (req, res) => {
   }
 });
 
-app.put('/partner-requests/:id', async (req, res) => {
+app.put('/partner-requests/:id', verifyToken, async (req, res) => {
   try {
     const { status } = req.body;
+
+    if (!['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: "Statut invalide." });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "ID demande invalide" });
+    }
+
     const request = await PartnerRequest.findById(req.params.id);
     if (!request) return res.status(404).json({ message: "Demande non trouvée" });
+
+    if (!request.to.equals(req.userId)) {
+      return res.status(403).json({ message: "Seul le destinataire peut répondre à cette demande." });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(409).json({ message: "Cette demande a déjà été traitée." });
+    }
+
     request.status = status;
     await request.save();
 
@@ -429,34 +466,36 @@ app.put('/partner-requests/:id', async (req, res) => {
 
 // Delete
 
-app.delete("/deleteUser", [ rateLimitMiddleware], async (req, res) => {
-    try{
-        const {userId} = req.body;
+app.delete('/deleteUser', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+    try {
+        const userId = req.userId;
 
-        if(!userId){
-            return res.status(400).send("Erreur lors de la suppression de l'utilisateur : idUser est obligatoire");
-        }
+        await User.findByIdAndDelete(userId);
+        await Poste.deleteMany({ author: userId });
+        await PartnerRequest.deleteMany({ $or: [{ from: userId }, { to: userId }] });
 
-        const deleteUser = await User.deleteOne({_id: userId});
-        await Poste.deleteMany({ owner: userId });
-        await DemandePartenaire.deleteMany({ $or: [{ from: userId }, { to: userId }] });
-
-        if(!deleteUser){
-            res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
-        }
-
-        res.status(200).json(deleteUser);
-    } catch(err){
-        res.status(500).json({ error: "Erreur lors de la suppression de l'utilisateur :", details: err.toString() });
+        res.status(200).json({ message: "Compte supprimé avec succès." });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Erreur lors de la suppression du compte." });
     }
-})
+});
 
-app.delete('/post/:id', async (req, res) => {
+app.delete('/post/:id', verifyToken, async (req, res) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "ID post invalide" });
+    }
+
     const post = await Poste.findById(req.params.id);
 
     if (!post) return res.status(404).json({ message: 'Post non trouvé.' });
 
+    if (!post.author.equals(req.userId) && !req.isAdmin) {
+      return res.status(403).json({ message: "Vous ne pouvez supprimer que vos propres posts." });
+    }
+
+    await Comment.deleteMany({ post: post._id });
     await post.deleteOne();
     res.json({ message: 'Post supprimé avec succès.' });
   } catch (err) {
@@ -465,26 +504,23 @@ app.delete('/post/:id', async (req, res) => {
   }
 });
 
-app.delete('/deleteUser', [ rateLimitMiddleware], async (req, res) => {
-    try {
-        const userId = req.userId;
-
-        await User.findByIdAndDelete(userId);
-        await Poste.deleteMany({ owner: userId });
-        await DemandePartenaire.deleteMany({ $or: [{ from: userId }, { to: userId }] });
-
-        res.status(200).json({ message: "Compte supprimé avec succès." });
-    } catch (err) {
-        res.status(500).json({ error: "Erreur lors de la suppression du compte : ", details: err.toString() });
-    }
-});
-
-app.delete('/comments/:id', async (req, res) => {
+app.delete('/comments/:id', verifyToken, async (req, res) => {
   try {
-    const comment = await Comment.findByIdAndDelete(req.params.id);
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "ID commentaire invalide" });
+    }
 
+    const comment = await Comment.findById(req.params.id);
+
+    if (!comment) return res.status(404).json({ message: "Commentaire non trouvé." });
+
+    if (!comment.author.equals(req.userId) && !req.isAdmin) {
+      return res.status(403).json({ message: "Vous ne pouvez supprimer que vos propres commentaires." });
+    }
+
+    await comment.deleteOne();
     await Poste.findByIdAndUpdate(comment.post, {
-      $pull: { comments: req.params.id }
+      $pull: { comments: comment._id }
     });
 
     res.json({ message: "Commentaire supprimé", comment });

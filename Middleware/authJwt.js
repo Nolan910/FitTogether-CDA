@@ -1,38 +1,34 @@
 const jwt = require("jsonwebtoken");
-const config = require("../config/key.js");
 const User = require("../models/users.js");
 
+const verifyToken = async (req, res, next) => {
+  const authHeader = req.headers.authorization || "";
+  const [scheme, token] = authHeader.split(" ");
 
-verifyToken = (req, res, next) => {
-  let token = req.headers["x-access-token"];
-
-  if (!token) {
-    return res.status(403).send({ message: "No token provided!" });
+  if (scheme !== "Bearer" || !token) {
+    return res.status(401).json({ message: "Veuillez vous connecter." });
   }
 
-  jwt.verify(token, config.secret, (err, decoded) => {
-    if (err) {
-      return res.status(401).send({
-        message: "Unauthorized!",
-      });
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(401).json({ message: "Session invalide ou expirée." });
+  }
+
+  try {
+    const user = await User.findById(decoded.userId).select("isAdmin");
+    if (!user) {
+      return res.status(401).json({ message: "Utilisateur introuvable." });
     }
-    req.userId = decoded.id;
+
+    req.userId = user._id.toString();
+    req.isAdmin = user.isAdmin === true;
     next();
-  });
-};
-
-isExist = async (req, res, next) => {
-  const user = await User.findById(req.userId);
-  if (!user) {
-    res.status(403).send({ message: "User not found" });
-    return;
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur." });
   }
-  next();
 };
 
-
-const authJwt = {
-  verifyToken,
-  isExist,
-};
-module.exports = authJwt;
+module.exports = { verifyToken };
