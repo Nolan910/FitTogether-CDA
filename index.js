@@ -16,10 +16,22 @@ const PartnerRequest = require("./models/partner_request.js");
 const Message = require("./models/message.js");
 const { upload } = require('./config/cloudinary');
 const rateLimitMiddleware = require('./Middleware/limiter.js');
+const { loginLimiter } = rateLimitMiddleware;
 const { verifyToken } = require('./Middleware/authJwt.js');
 
 const PUBLIC_USER_FIELDS = 'name profilPic';
 const HIDDEN_USER_FIELDS = '-password -email -receivedRequests';
+
+const arePartners = async (userA, userB) => {
+  const request = await PartnerRequest.exists({
+    status: 'accepted',
+    $or: [
+      { from: userA, to: userB },
+      { from: userB, to: userA }
+    ]
+  });
+  return Boolean(request);
+};
 
 dotenv.config();
 
@@ -38,6 +50,7 @@ app.use(cors({
   },
   credentials: true
   }));
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.static('public'));
 app.use('/uploads', express.static('uploads'));
@@ -181,19 +194,22 @@ app.get('/post/:id', async (req, res) => {
   }
 });
 
-app.get('/messages/:user1/:user2', async (req, res) => {
-  const { user1, user2 } = req.params;
+app.get('/messages/:partnerId', verifyToken, async (req, res) => {
+  const me = req.userId;
+  const { partnerId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(partnerId)) {
+    return res.status(400).json({ message: "ID utilisateur invalide" });
+  }
 
   try {
     const messages = await Message.find({
       $or: [
-        { from: user1, to: user2 },
-        { from: user2, to: user1 }
+        { from: me, to: partnerId },
+        { from: partnerId, to: me }
       ]
     })
-    .sort({ timestamp: 1 })
-    .populate('from', 'name profilPic')
-    .populate('to', 'name profilPic');
+    .sort({ timestamp: 1 });
 
     res.json(messages);
   } catch (err) {
@@ -268,7 +284,7 @@ app.post('/createPoste', [ rateLimitMiddleware, verifyToken ], async (req, res) 
   
 });
 
-app.post('/login', async (req, res) => {
+app.post('/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -343,13 +359,34 @@ app.post('/user/:id/request-partner', [ rateLimitMiddleware, verifyToken ], asyn
     return res.status(400).json({ message: "ID utilisateur invalide" });
   }
 
-  try {
+  if (from === to) {
+    return res.status(400).json({ message: "Vous ne pouvez pas vous envoyer une demande." });
+  }
 
-    const existing = await PartnerRequest.findOne({ from, to, status: 'pending' });
-    if (existing) {
-      return res.status(409).json({ message: "Demande déjà envoyée." });
+  try {
+    const target = await User.exists({ _id: to });
+    if (!target) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
     }
-   
+
+    if (await arePartners(from, to)) {
+      return res.status(409).json({ message: "Vous êtes déjà partenaires." });
+    }
+
+    const existing = await PartnerRequest.findOne({
+      status: 'pending',
+      $or: [
+        { from, to },
+        { from: to, to: from }
+      ]
+    });
+    if (existing) {
+      const message = existing.from.equals(from)
+        ? "Demande déjà envoyée."
+        : "Cet utilisateur vous a déjà envoyé une demande.";
+      return res.status(409).json({ message });
+    }
+
     const request = new PartnerRequest({ from, to });
     await request.save();
 
@@ -369,7 +406,15 @@ app.post('/messages', verifyToken, async (req, res) => {
     return res.status(400).json({ message: "Champs manquants." });
   }
 
+  if (!mongoose.Types.ObjectId.isValid(to)) {
+    return res.status(400).json({ message: "ID utilisateur invalide" });
+  }
+
   try {
+  if (!(await arePartners(from, to))) {
+    return res.status(403).json({ message: "Vous ne pouvez écrire qu'à vos partenaires." });
+  }
+
   const newMessage = await Message.create({ from, to, content });
   res.status(201).json(newMessage);
   } catch (err) {
@@ -470,9 +515,24 @@ app.delete('/deleteUser', [ rateLimitMiddleware, verifyToken ], async (req, res)
     try {
         const userId = req.userId;
 
-        await User.findByIdAndDelete(userId);
+        const userPostIds = await Poste.find({ author: userId }).distinct('_id');
+        const userCommentIds = await Comment.find({ author: userId }).distinct('_id');
+
+        await Comment.deleteMany({
+          $or: [
+            { author: userId },
+            { post: { $in: userPostIds } }
+          ]
+        });
+        await Poste.updateMany(
+          { comments: { $in: userCommentIds } },
+          { $pull: { comments: { $in: userCommentIds } } }
+        );
         await Poste.deleteMany({ author: userId });
+        await Message.deleteMany({ $or: [{ from: userId }, { to: userId }] });
         await PartnerRequest.deleteMany({ $or: [{ from: userId }, { to: userId }] });
+        await User.updateMany({ partners: userId }, { $pull: { partners: userId } });
+        await User.findByIdAndDelete(userId);
 
         res.status(200).json({ message: "Compte supprimé avec succès." });
     } catch (err) {
