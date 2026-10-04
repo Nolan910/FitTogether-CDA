@@ -6,7 +6,6 @@ const dotenv = require('dotenv');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
-const cloudinary = require('cloudinary').v2;
 const path = require('path');
 
 const User = require("./models/users");
@@ -18,9 +17,17 @@ const { upload } = require('./config/cloudinary');
 const rateLimitMiddleware = require('./Middleware/limiter.js');
 const { loginLimiter } = rateLimitMiddleware;
 const { verifyToken } = require('./Middleware/authJwt.js');
+const {
+  registerRules,
+  loginRules,
+  updateUserRules,
+  postRules,
+  commentRules,
+  messageRules,
+} = require('./Middleware/validators.js');
 
 const PUBLIC_USER_FIELDS = 'name profilPic';
-const HIDDEN_USER_FIELDS = '-password -email -receivedRequests';
+const PROFILE_FIELDS = 'name profilPic level bio location isAdmin';
 
 const arePartners = async (userA, userB) => {
   const request = await PartnerRequest.exists({
@@ -80,7 +87,7 @@ app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
       return res.status(400).json({ message: "ID utilisateur invalide" });
     }
 
-    const user = await User.findById(idUser).select(HIDDEN_USER_FIELDS);
+    const user = await User.findById(idUser).select(PROFILE_FIELDS);
 
     if (!user) {
       return res.status(404).json({ error: "Utilisateur non trouvé." });
@@ -89,10 +96,7 @@ app.get('/user/:id', [ rateLimitMiddleware], async (req, res) => {
     res.status(200).json(user);
   } catch (err) {
     console.error("Erreur de récupération :", err);
-    res.status(500).json({ 
-      error: "Erreur lors de la récupération de l'utilisateur",
-      details: err.message,
-    });
+    res.status(500).json({ message: "Erreur lors de la récupération de l'utilisateur" });
   }
 })
 
@@ -221,13 +225,13 @@ app.get('/messages/:partnerId', verifyToken, async (req, res) => {
 
 // Post
 
-app.post('/createUser', [ rateLimitMiddleware ], async (req, res) => {
+app.post('/createUser', [ rateLimitMiddleware, ...registerRules ], async (req, res) => {
     try {
       const { name, email, password, level, bio, location } = req.body;
   
       const existingUser = await User.findOne({ email });
       if (existingUser) {
-        return res.status(400).json({ error: 'Cet email est déjà utilisé.' });
+        return res.status(400).json({ message: 'Cet email est déjà utilisé.' });
       }
   
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -240,38 +244,31 @@ app.post('/createUser', [ rateLimitMiddleware ], async (req, res) => {
         isAdmin: false,
         bio,
         location,
-        partenaires: [],
       });
-  
-      await newUser.save();
 
-      const token = jwt.sign(
-      { userId: newUser._id, email: newUser.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '2h' }
-    );
+      await newUser.save();
 
       res.status(201).json({ message: "Utilisateur créé avec succès !" });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Erreur lors de la création de l'utilisateur : ", details: err.toString() });
+      res.status(500).json({ message: "Erreur lors de la création de l'utilisateur." });
     }
   });
 
 
-app.post('/createPoste', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+app.post('/createPoste', [ rateLimitMiddleware, verifyToken, upload.single('image'), ...postRules ], async (req, res) => {
 
   try {
-    const { description, imageUrl } = req.body;
+    const { description } = req.body;
 
-    if (!description || !imageUrl) {
-      return res.status(400).json({ message: 'Champs manquants' });
+    if (!req.file || !req.file.path) {
+      return res.status(400).json({ message: 'Veuillez sélectionner une image.' });
     }
 
     const newPost = new Poste({
       description,
       author: req.userId,
-      imageUrl,
+      imageUrl: req.file.path,
       comments: [],
     });
 
@@ -284,7 +281,7 @@ app.post('/createPoste', [ rateLimitMiddleware, verifyToken ], async (req, res) 
   
 });
 
-app.post('/login', loginLimiter, async (req, res) => {
+app.post('/login', [ loginLimiter, ...loginRules ], async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -311,8 +308,7 @@ app.post('/login', loginLimiter, async (req, res) => {
         location: user.location,
         bio: user.bio,
         profilPic: user.profilPic,
-        isAdmin: user.isAdmin,
-        partners: user.partners
+        isAdmin: user.isAdmin
       }
     });
   } catch (error) {
@@ -321,12 +317,9 @@ app.post('/login', loginLimiter, async (req, res) => {
   }
 });
 
-app.post('/post/:id/comment', verifyToken, async (req, res) => {
+app.post('/post/:id/comment', [ verifyToken, ...commentRules ], async (req, res) => {
   const { id } = req.params;
   const { content } = req.body;
-  if (!content) {
-    return res.status(400).json({ message: 'Contenu requis' });
-  }
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ message: "ID post invalide" });
   }
@@ -398,17 +391,9 @@ app.post('/user/:id/request-partner', [ rateLimitMiddleware, verifyToken ], asyn
 
 });
 
-app.post('/messages', verifyToken, async (req, res) => {
+app.post('/messages', [ verifyToken, ...messageRules ], async (req, res) => {
   const { to, content } = req.body;
   const from = req.userId;
-
-  if (!to || !content) {
-    return res.status(400).json({ message: "Champs manquants." });
-  }
-
-  if (!mongoose.Types.ObjectId.isValid(to)) {
-    return res.status(400).json({ message: "ID utilisateur invalide" });
-  }
 
   try {
   if (!(await arePartners(from, to))) {
@@ -434,7 +419,7 @@ const isSelf = (req, res, next) => {
   next();
 };
 
-app.put('/user/:id', verifyToken, isSelf, upload.single('profilPic'), async (req, res) => {
+app.put('/user/:id', verifyToken, isSelf, upload.single('profilPic'), ...updateUserRules, async (req, res) => {
   try {
     const { name, bio, level, location } = req.body;
     const userId = req.userId;
@@ -446,14 +431,11 @@ app.put('/user/:id', verifyToken, isSelf, upload.single('profilPic'), async (req
     if (location) updateData.location = location;
 
     if (req.file && req.file.path) {
-      const cloudinaryResult = await cloudinary.uploader.upload(req.file.path, {
-        folder: 'FitTogether',
-      });
-      updateData.profilPic = cloudinaryResult.secure_url; // URL Cloudinary
+      updateData.profilPic = req.file.path;
     }
 
     await User.findByIdAndUpdate(userId, { $set: updateData }, { runValidators: true });
-    const refreshedUser = await User.findById(userId).select('-password -receivedRequests');
+    const refreshedUser = await User.findById(userId).select(`${PROFILE_FIELDS} email`);
 
     res.json(refreshedUser);
   } catch (err) {
@@ -488,16 +470,6 @@ app.put('/partner-requests/:id', verifyToken, async (req, res) => {
     request.status = status;
     await request.save();
 
-    if (status === 'accepted') {
-      // Ajoute les partenaires mutuellement
-      await User.findByIdAndUpdate(request.from, {
-        $addToSet: { partners: request.to }
-      });
-      await User.findByIdAndUpdate(request.to, {
-        $addToSet: { partners: request.from }
-      });
-    }
-
     const updatedRequest = await PartnerRequest.findById(req.params.id).populate('from', 'name profilPic');
     res.json({
       message: `Demande ${status === 'accepted' ? 'acceptée' : 'refusée'}.`,
@@ -512,32 +484,37 @@ app.put('/partner-requests/:id', verifyToken, async (req, res) => {
 // Delete
 
 app.delete('/deleteUser', [ rateLimitMiddleware, verifyToken ], async (req, res) => {
+    const session = await mongoose.startSession();
     try {
         const userId = req.userId;
 
-        const userPostIds = await Poste.find({ author: userId }).distinct('_id');
-        const userCommentIds = await Comment.find({ author: userId }).distinct('_id');
+        await session.withTransaction(async () => {
+            const userPostIds = await Poste.distinct('_id', { author: userId }).session(session);
+            const userCommentIds = await Comment.distinct('_id', { author: userId }).session(session);
 
-        await Comment.deleteMany({
-          $or: [
-            { author: userId },
-            { post: { $in: userPostIds } }
-          ]
+            await Comment.deleteMany({
+              $or: [
+                { author: userId },
+                { post: { $in: userPostIds } }
+              ]
+            }, { session });
+            await Poste.updateMany(
+              { comments: { $in: userCommentIds } },
+              { $pull: { comments: { $in: userCommentIds } } },
+              { session }
+            );
+            await Poste.deleteMany({ author: userId }, { session });
+            await Message.deleteMany({ $or: [{ from: userId }, { to: userId }] }, { session });
+            await PartnerRequest.deleteMany({ $or: [{ from: userId }, { to: userId }] }, { session });
+            await User.findByIdAndDelete(userId, { session });
         });
-        await Poste.updateMany(
-          { comments: { $in: userCommentIds } },
-          { $pull: { comments: { $in: userCommentIds } } }
-        );
-        await Poste.deleteMany({ author: userId });
-        await Message.deleteMany({ $or: [{ from: userId }, { to: userId }] });
-        await PartnerRequest.deleteMany({ $or: [{ from: userId }, { to: userId }] });
-        await User.updateMany({ partners: userId }, { $pull: { partners: userId } });
-        await User.findByIdAndDelete(userId);
 
         res.status(200).json({ message: "Compte supprimé avec succès." });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Erreur lors de la suppression du compte." });
+    } finally {
+        await session.endSession();
     }
 });
 
@@ -588,6 +565,22 @@ app.delete('/comments/:id', verifyToken, async (req, res) => {
     console.error(error);
     res.status(500).json({ message: "Erreur serveur lors de la suppression" });
   }
+});
+
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? "L'image ne doit pas dépasser 5 Mo."
+      : "Fichier invalide.";
+    return res.status(400).json({ message });
+  }
+
+  if (err.http_code === 400) {
+    return res.status(400).json({ message: "Format d'image non accepté (jpg, jpeg ou png)." });
+  }
+
+  console.error(err);
+  res.status(500).json({ message: "Erreur serveur." });
 });
 
 //Pour test en local
