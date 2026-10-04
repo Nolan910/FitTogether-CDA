@@ -1,5 +1,7 @@
 # FitTogether API
 
+[![CI](https://github.com/Nolan910/FitTogether-CDA/actions/workflows/ci.yml/badge.svg)](https://github.com/Nolan910/FitTogether-CDA/actions/workflows/ci.yml)
+
 API REST de FitTogether, une application pour trouver des partenaires de sport, publier des photos de ses séances et discuter avec ses partenaires.
 
 Front-end : [FitTogether](https://github.com/Nolan910/FitTogether)
@@ -112,6 +114,7 @@ Les tests tournent sur une base MongoDB en mémoire (`mongodb-memory-server`), s
 - l'inscription, la validation des entrées et la connexion ;
 - la suppression complète d'un compte.
 
-## Déploiement
+## Intégration et déploiement continus
 
-L'API est déployée sur Render (commande de démarrage : `npm start`). Les variables d'environnement sont à renseigner dans le tableau de bord Render.
+- **CI (GitHub Actions)** : à chaque push et à chaque pull request sur `master`, le workflow `.github/workflows/ci.yml` installe les dépendances avec `npm ci` et lance les tests avec la couverture de code. Le rapport de couverture est disponible dans les artefacts du workflow pendant 7 jours.
+- **CD (Render)** : l'API est déployée sur Render (commande de démarrage : `npm start`), avec l'auto-deploy réglé sur « After CI Checks Pass ». Un commit n'est donc mis en production que si les tests passent. Les variables d'environnement sont à renseigner dans le tableau de bord Render.
