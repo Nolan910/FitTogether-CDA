@@ -1,14 +1,14 @@
-const express = require('express');
 const rateLimit = require('express-rate-limit');
 
-const app = express();
+const skip = () => process.env.NODE_ENV === 'test';
 
 const limiteur = rateLimit({
     windowMs: 1 * 1000,
     max: 10,
-    message: 'Trop de requêtes. Essayez à nouveau plus tard',
+    message: { message: 'Trop de requêtes. Essayez à nouveau plus tard' },
     standardHeaders: true,
     legacyHeaders: false,
+    skip,
 });
 
 const loginLimiter = rateLimit({
@@ -18,6 +18,7 @@ const loginLimiter = rateLimit({
     message: { message: 'Trop de tentatives de connexion. Réessayez dans 15 minutes.' },
     standardHeaders: true,
     legacyHeaders: false,
+    skip,
 });
 
 module.exports = limiteur;

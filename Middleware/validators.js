@@ -71,6 +71,11 @@ const messageRules = [
   validate,
 ];
 
+const partnerResponseRules = [
+  body('status', 'Statut invalide.').isIn(['accepted', 'rejected']),
+  validate,
+];
+
 module.exports = {
   registerRules,
   loginRules,
@@ -78,4 +83,5 @@ module.exports = {
   postRules,
   commentRules,
   messageRules,
+  partnerResponseRules,
 };

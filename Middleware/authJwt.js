@@ -26,9 +26,15 @@ const verifyToken = async (req, res, next) => {
     req.isAdmin = user.isAdmin === true;
     next();
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Erreur serveur." });
+    next(err);
   }
 };
 
-module.exports = { verifyToken };
+const isSelf = (req, res, next) => {
+  if (req.params.id !== req.userId) {
+    return res.status(403).json({ message: "Accès refusé." });
+  }
+  next();
+};
+
+module.exports = { verifyToken, isSelf };
