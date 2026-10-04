@@ -27,7 +27,7 @@ const location = () => body('location', 'La localisation doit contenir entre 1 e
 
 const registerRules = [
   name(),
-  body('email', 'Email invalide.').isString().trim().isEmail().isLength({ max: 254 }),
+  body('email', 'Email invalide.').isString().trim().toLowerCase().isEmail().isLength({ max: 254 }),
   body('password', 'Le mot de passe doit contenir entre 8 et 72 caractères.')
     .isString().isLength({ min: 8, max: 72 })
     .matches(/[A-Za-z]/).withMessage('Le mot de passe doit contenir au moins une lettre.')
@@ -39,7 +39,7 @@ const registerRules = [
 ];
 
 const loginRules = [
-  body('email', 'Email requis.').isString().trim().notEmpty(),
+  body('email', 'Email requis.').isString().trim().toLowerCase().notEmpty(),
   body('password', 'Mot de passe requis.').isString().notEmpty(),
   validate,
 ];

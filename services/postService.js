@@ -3,6 +3,7 @@ const Poste = require('../models/post');
 const Comment = require('../models/comment');
 const HttpError = require('../utils/httpError');
 const { PUBLIC_USER_FIELDS } = require('../config/userFields');
+const { deleteImages } = require('./imageService');
 
 const listPosts = () => Poste.find()
   .populate('author', PUBLIC_USER_FIELDS)
@@ -53,6 +54,7 @@ const deletePost = async (postId, { userId, isAdmin }) => {
 
   await Comment.deleteMany({ post: post._id });
   await post.deleteOne();
+  await deleteImages([post.imageUrl]);
 };
 
 module.exports = { listPosts, listUserPosts, getPost, createPost, deletePost };

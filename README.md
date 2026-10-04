@@ -70,6 +70,8 @@ Une requête traverse les couches dans cet ordre : `route → middlewares → co
 - **Images** : l'upload passe par l'API (5 Mo maximum, jpg, jpeg ou png).
 - **Rate limit** : 10 échecs de connexion par IP toutes les 15 minutes sur `/login`.
 - **Suppression de compte** : faite dans une transaction, elle efface les posts, commentaires, messages et demandes de l'utilisateur.
+- **Droit à l'effacement** : les images sont supprimées de Cloudinary quand on supprime un post, son compte, ou qu'on change de photo de profil. Le `public_id` est déduit de l'URL, ce qui couvre aussi les anciennes images.
+- **Emails** : enregistrés et comparés en minuscules. Une inscription en double renvoie toujours une 400, même en cas d'envoi simultané.
 
 ## Routes
 

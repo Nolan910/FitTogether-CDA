@@ -41,6 +41,45 @@ describe('Inscription', () => {
     expect(res.body.message).toBe('Cet email est déjà utilisé.');
   });
 
+  test("enregistre l'email en minuscules", async () => {
+    const res = await request(app).post('/createUser').send({ ...validUser, email: '  Nolan@Test.FR ' });
+
+    expect(res.status).toBe(201);
+    expect(await User.exists({ email: 'nolan@test.fr' })).not.toBeNull();
+  });
+
+  test("refuse le même email avec une casse différente", async () => {
+    await request(app).post('/createUser').send({ ...validUser, email: 'Nolan@Test.fr' });
+
+    const res = await request(app).post('/createUser').send({ ...validUser, email: 'nolan@test.fr' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Cet email est déjà utilisé.');
+  });
+
+  test('deux inscriptions simultanées avec le même email : une 201 et une 400', async () => {
+    await User.init();
+
+    const responses = await Promise.all([
+      request(app).post('/createUser').send(validUser),
+      request(app).post('/createUser').send(validUser),
+    ]);
+
+    expect(responses.map((res) => res.status).sort()).toEqual([201, 400]);
+    expect(await User.countDocuments({ email: validUser.email })).toBe(1);
+  });
+
+  test("transforme l'erreur d'index unique en 400", async () => {
+    await User.init();
+    await createUser({ email: validUser.email });
+    jest.spyOn(User, 'exists').mockResolvedValue(null);
+
+    const res = await request(app).post('/createUser').send(validUser);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Cet email est déjà utilisé.');
+  });
+
   test.each([
     ['un email invalide', { email: 'pas-un-email' }, 'Email invalide.'],
     ['un mot de passe trop court', { password: 'abc1' }, 'Le mot de passe doit contenir entre 8 et 72 caractères.'],
@@ -65,6 +104,16 @@ describe('Connexion', () => {
     expect(res.status).toBe(200);
     expect(res.body.token).toEqual(expect.any(String));
     expect(res.body.user).not.toHaveProperty('password');
+  });
+
+  test("accepte l'email quelle que soit la casse", async () => {
+    await createUser({ email: 'login@test.fr', password: 'motdepasse1' });
+
+    const res = await request(app)
+      .post('/login')
+      .send({ email: 'Login@Test.FR', password: 'motdepasse1' });
+
+    expect(res.status).toBe(200);
   });
 
   test('refuse un mauvais mot de passe', async () => {
