@@ -30,7 +30,7 @@ jobs:
           cache: npm
 
       - name: Cache des binaires MongoDB
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /home/runner/.cache/mongodb-binaries
           key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
