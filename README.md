@@ -104,21 +104,117 @@ Une requête traverse les couches dans cet ordre : `route → middlewares → co
 ## Tests
 
 ```bash
-npm test
+npm test                    # tous les tests
+npm test -- --coverage      # avec le rapport de couverture (dossier coverage/)
 ```
 
-Les tests tournent sur une base MongoDB en mémoire (`mongodb-memory-server`), sans toucher à la vraie base. Ils couvrent :
+Les tests tournent sur une base MongoDB en mémoire (`mongodb-memory-server`, en replica set pour les transactions) et Cloudinary est simulé : ils ne touchent jamais la base ni les images de production, et ne demandent aucune variable d'environnement. Ils couvrent :
 
 - `verifyToken` : token absent, mal formé, signé avec un autre secret, expiré, compte supprimé ;
 - les contrôles de droits (403) sur les posts, commentaires, profils, demandes de partenariat et messages ;
 - l'identité tirée du token plutôt que du body ;
-- l'inscription, la validation des entrées et la connexion ;
-- la suppression complète d'un compte.
+- l'inscription, la validation des entrées, la connexion et l'injection NoSQL ;
+- la limitation du nombre de tentatives de connexion ;
+- la suppression complète d'un compte et de ses images Cloudinary ;
+- la route `/health`.
 
-## Intégration et déploiement continus
+Le détail des cas et la recette manuelle sont décrits dans le plan de tests du dossier de projet.
 
-- **CI (GitHub Actions)** : à chaque push et à chaque pull request sur `master`, le workflow `.github/workflows/ci.yml` installe les dépendances avec `npm ci`, vérifie qu'aucune dépendance de production n'a de faille critique (`npm audit`), puis lance les tests avec la couverture de code. Le rapport de couverture est disponible dans les artefacts du workflow pendant 7 jours.
-- **Version de Node** : fixée à 22 par le champ `engines` du `package.json`, lu à la fois par la CI et par Render.
-- **Dépendances** : Dependabot propose chaque semaine des pull requests de mise à jour (npm et GitHub Actions).
-- **Vérification après déploiement** : Render utilise `/health` comme health check. Si la nouvelle version ne répond pas 200, le déploiement est annulé et l'ancienne version reste en ligne. Le workflow `.github/workflows/post-deploy.yml` permet en plus de vérifier la prod à la main depuis l'onglet Actions (« Run workflow ») : il attend que `/health` renvoie le commit attendu avec une base connectée, puis contrôle quelques routes.
-- **CD (Render)** : l'API est déployée sur Render (commande de démarrage : `npm start`), avec l'auto-deploy réglé sur « After CI Checks Pass ». Un commit n'est donc mis en production que si les tests passent. Les variables d'environnement sont à renseigner dans le tableau de bord Render.
+## Environnements
+
+| Environnement | Rôle | Base de données | Images | Variables d'environnement |
+|---|---|---|---|---|
+| Local | Développement | La base indiquée dans `MONGO_URL` (aujourd'hui la base Atlas de production ; une base dédiée au développement est recommandée) | Le compte Cloudinary indiqué dans `.env` | Fichier `.env` (non versionné), modèle dans `.env.example` |
+| Tests (local et CI) | Tests d'intégration automatisés | MongoDB en mémoire, recréée à chaque exécution | Simulées | Aucune : fournies par `tests/setupEnv.js` |
+| Production | Application en ligne | MongoDB Atlas (cluster de production) | Cloudinary, dossier `FitTogether` | Tableau de bord Render, onglet *Environment* |
+
+Les secrets (`MONGO_URL`, `JWT_SECRET`, clés Cloudinary) ne sont jamais versionnés : `.env` est dans le `.gitignore`, et en production ils ne vivent que dans Render.
+
+## Déploiement
+
+L'API est hébergée sur **Render** (service web Node.js, offre gratuite) et la base sur **MongoDB Atlas**.
+
+### Pipeline
+
+```
+push / pull request ──► CI GitHub Actions ──► CI verte ? ──► Render déploie ──► health check /health ──► smoke test (manuel)
+                         audit npm, tests        │ non                              │ échec
+                                                 └─► rien n'est déployé             └─► l'ancienne version reste en ligne
+```
+
+| Fichier | Déclenchement | Étapes |
+|---|---|---|
+| `.github/workflows/ci.yml` | Push et pull request sur `master` | `npm ci` → `npm audit --omit=dev --audit-level=critical` → tests avec couverture → rapport de couverture en artefact (7 jours) |
+| `.github/workflows/post-deploy.yml` | À la main (*Actions* → *Vérification après déploiement* → *Run workflow*). Render ne signale pas ses déploiements à GitHub, ce workflow ne peut donc pas se lancer seul. | Attend que `/health` renvoie le commit déployé et une base `up` (10 min maximum), puis vérifie `/posts` (200), une route protégée sans token (401) et un identifiant invalide (400) |
+| `.github/dependabot.yml` | Chaque semaine | Pull requests de mise à jour des dépendances npm (mineures et correctifs) et des actions GitHub |
+
+### Procédure de mise en production
+
+1. Créer une branche depuis `master`, développer, lancer `npm test` en local.
+2. Pousser la branche et ouvrir une pull request vers `master` : la CI s'exécute.
+3. Si la CI est rouge : lire le job en échec (onglet *Actions*), corriger, pousser à nouveau.
+4. Si la CI est verte : fusionner la pull request.
+5. La CI s'exécute sur `master`, puis Render déploie automatiquement (*Auto-Deploy : After CI Checks Pass*) : `npm ci --omit=dev`, puis `node index.js`.
+6. Render appelle `/health` : la nouvelle version ne remplace l'ancienne que si elle répond 200.
+7. Lancer le smoke test (`post-deploy.yml`) depuis l'onglet *Actions* et vérifier qu'il est vert.
+8. Dérouler la recette manuelle sur le site en ligne pour les fonctionnalités modifiées.
+
+L'offre gratuite de Render met le service en veille après une période d'inactivité : la première requête après une veille peut prendre une minute environ. Le smoke test en tient compte (tentatives répétées).
+
+### Configuration initiale (une seule fois)
+
+**MongoDB Atlas**
+
+1. Créer un cluster, puis un utilisateur de base avec un mot de passe fort et les seuls droits de lecture et écriture sur la base de l'application.
+2. *Network Access* : Render (offre gratuite) n'a pas d'adresse IP fixe, l'accès est donc ouvert (`0.0.0.0/0`). La protection repose sur l'authentification et le chiffrement TLS de la connexion.
+3. Copier la chaîne de connexion dans `MONGO_URL`.
+
+**Render**
+
+| Paramètre | Valeur |
+|---|---|
+| Runtime | Node (version 22, lue dans `engines`) |
+| Build command | `npm ci --omit=dev` (versions exactes du `package-lock.json`, sans les dépendances de développement) |
+| Start command | `node index.js` (équivalent à `npm start`) |
+| Health check path | `/health` |
+| Auto-Deploy | After CI Checks Pass |
+| Variables d'environnement | `MONGO_URL`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` (le port est fourni par Render) |
+
+**CORS** : les origines autorisées sont listées dans `app.js` (`allowedOrigins`). Si l'URL du front change, l'ajouter à cette liste avant de déployer.
+
+**GitHub**
+- Installer l'application GitHub **Render** sur le dépôt (*Installed GitHub Apps*) : sans elle, Render ne reçoit ni les pushes ni le résultat de la CI, et l'auto-deploy ne se déclenche pas.
+- Protéger `master` par un ruleset (*Settings* → *Rules* → *Rulesets*) : suppression et force-push interdits, fusion uniquement par pull request, job *Tests* obligatoirement vert. L'administrateur du dépôt figure dans la liste de contournement (*bypass*) et peut pousser directement sur `master`. La CI s'exécute quand même, et Render ne déploie que si elle est verte.
+
+### Retour à une version précédente (rollback)
+
+- **Rapide** : Render → onglet *Events* → choisir le dernier déploiement qui fonctionnait → *Rollback*.
+- **Durable** : `git revert <commit>` puis push sur `master` ; la correction passe par la CI comme n'importe quel changement.
+
+### Sauvegarde et restauration de la base
+
+L'offre gratuite d'Atlas ne fait pas de sauvegarde automatique. Avant toute opération risquée (migration, script de maintenance), faire une sauvegarde avec les [MongoDB Database Tools](https://www.mongodb.com/docs/database-tools/) :
+
+```bash
+# Sauvegarde
+mongodump --uri "$MONGO_URL" --out ./backup/$(date +%F)
+
+# Restauration (--drop remplace les collections existantes)
+mongorestore --uri "$MONGO_URL" --drop ./backup/2026-10-07
+```
+
+Une sauvegarde contient des données personnelles : la stocker hors du dépôt (`backup/` ne doit jamais être commité), dans un espace chiffré, et la supprimer quand elle n'est plus utile.
+
+### En cas d'incident
+
+| Symptôme | Où regarder | Action |
+|---|---|---|
+| `/health` répond 503 (`database: down`) | Statut d'Atlas, logs Render | Vérifier `MONGO_URL` et l'accès réseau Atlas ; redémarrer le service |
+| Le déploiement échoue | Logs de build Render | Corriger, pousser ; l'ancienne version reste en ligne pendant ce temps |
+| Une régression est en ligne | Signalement, smoke test | Rollback Render, puis correctif + test de non-régression |
+| Erreurs CORS côté front | Console du navigateur | Vérifier `allowedOrigins` dans `app.js` |
+
+## Veille
+
+- **Dépendances** : `npm audit` bloque la CI en cas de faille critique ; Dependabot propose les mises à jour chaque semaine. C'est ainsi que `multer-storage-cloudinary`, qui imposait une version vulnérable de Cloudinary, a été remplacé.
+- **Sources suivies** : [CERT-FR](https://www.cert.ssi.gouv.fr/) (alertes de sécurité), [OWASP Top 10](https://owasp.org/www-project-top-ten/), [annonces de sécurité Node.js](https://nodejs.org/en/blog/vulnerability), [GitHub Advisory Database](https://github.com/advisories), journaux des changements de Render, Atlas et Vercel.
