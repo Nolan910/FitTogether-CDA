@@ -1,7 +1,7 @@
 const multer = require('multer');
 const HttpError = require('../utils/httpError');
 
-const errorHandler = (err, req, res, next) => {
+const errorHandler = (err, req, res, _next) => {
   if (err instanceof HttpError) {
     return res.status(err.status).json({ message: err.message });
   }

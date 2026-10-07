@@ -27,6 +27,7 @@ npm install
 | `npm run dev` | Lance le serveur avec rechargement automatique (nodemon) |
 | `npm start` | Lance le serveur (production) |
 | `npm test` | Lance les tests |
+| `npm run lint` | Vérifie le code avec ESLint |
 
 ## Architecture
 
@@ -111,7 +112,7 @@ L'API est hébergée sur Render et la base sur MongoDB Atlas
 
 ### Procédure de mise en production
 
-1. Créer une branche depuis `master`, développer, lancer `npm test` en local
+1. Créer une branche depuis `master`, développer, lancer `npm run lint` et `npm test` en local
 2. Pousser la branche et ouvrir une pull request vers `master` : la CI s'exécute
 3. Si la CI est verte : fusionner la pull request
 4. La CI s'exécute sur `master`, puis Render déploie automatiquement

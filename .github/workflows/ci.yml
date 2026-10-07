@@ -42,6 +42,9 @@ jobs:
       - name: Audit de sécurité des dépendances
         run: npm audit --omit=dev --audit-level=critical
 
+      - name: Lint
+        run: npm run lint
+
       - name: Tests
         run: npm test -- --ci --coverage
 
