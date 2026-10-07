@@ -40,7 +40,7 @@
     "express-rate-limit": "^7.5.0",
     "express-validator": "^7.3.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.13.2",
+    "mongoose": "^9.10.4",
     "multer": "^2.0.1"
   },
   "devDependencies": {
