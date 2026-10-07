@@ -1,0 +1,49 @@
+name: Vérification après déploiement
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-test:
+    name: Smoke test de la production
+    if: github.event_name == 'workflow_dispatch' || github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_URL: https://fittogether-back.onrender.com
+      EXPECTED_COMMIT: ${{ github.event.deployment.sha || github.sha }}
+
+    steps:
+      - name: Attendre que la nouvelle version soit en ligne
+        run: |
+          for attempt in $(seq 1 40); do
+            health=$(curl -s --max-time 30 "$API_URL/health" || true)
+            commit=$(echo "$health" | jq -r '.commit // empty' 2>/dev/null || true)
+            database=$(echo "$health" | jq -r '.database // empty' 2>/dev/null || true)
+            echo "Tentative $attempt : commit=${commit:-?} base=${database:-?}"
+            if [ "$commit" = "$EXPECTED_COMMIT" ] && [ "$database" = "up" ]; then
+              echo "La version $EXPECTED_COMMIT est en ligne et la base répond."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::La version $EXPECTED_COMMIT n'est pas en ligne après 10 minutes."
+          exit 1
+
+      - name: Vérifier les routes principales
+        run: |
+          check() {
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "$API_URL$1")
+            if [ "$status" != "$2" ]; then
+              echo "::error::$1 a répondu $status au lieu de $2"
+              exit 1
+            fi
+            echo "$1 -> $status"
+          }
+          check /posts 200
+          check /messages/507f1f77bcf86cd799439011 401
+          check /user/id-invalide 400

@@ -26,7 +26,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: package.json
           cache: npm
 
       - name: Cache des binaires MongoDB
@@ -38,6 +38,9 @@ jobs:
 
       - name: Installation des dépendances
         run: npm ci
+
+      - name: Audit de sécurité des dépendances
+        run: npm audit --omit=dev --audit-level=critical
 
       - name: Tests
         run: npm test -- --ci --coverage

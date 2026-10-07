@@ -32,8 +32,8 @@
   },
   "homepage": "https://github.com/Nolan910/FitTogether-CDA#readme",
   "dependencies": {
-    "bcrypt": "^5.1.1",
-    "cloudinary": "^1.41.3",
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
@@ -41,13 +41,15 @@
     "express-validator": "^7.3.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.13.2",
-    "multer": "^2.0.1",
-    "multer-storage-cloudinary": "^4.0.0"
+    "multer": "^2.0.1"
   },
   "devDependencies": {
     "jest": "^29.7.0",
     "mongodb-memory-server": "^10.4.3",
     "nodemon": "^3.1.9",
     "supertest": "^7.3.1"
+  },
+  "engines": {
+    "node": "22.x"
   }
 }

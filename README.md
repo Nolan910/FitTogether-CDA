@@ -11,7 +11,7 @@ Front-end : [FitTogether](https://github.com/Nolan910/FitTogether)
 - **Node.js / Express 4**
 - **MongoDB Atlas** avec **Mongoose**
 - **JWT** pour l'authentification, **bcrypt** pour les mots de passe
-- **Cloudinary** (via `multer-storage-cloudinary`) pour les images
+- **Cloudinary** pour les images, avec un moteur de stockage multer maison (`config/cloudinary.js`)
 - **express-validator** pour la validation des entrées, **express-rate-limit** contre le brute-force
 - **Jest**, **Supertest** et **mongodb-memory-server** pour les tests
 
@@ -81,6 +81,7 @@ Une requête traverse les couches dans cet ordre : `route → middlewares → co
 
 | Méthode | Route | Description | Règle d'accès |
 |---|---|---|---|
+| GET | `/health` | État de l'API : commit déployé et connexion à la base (503 si la base est injoignable) | |
 | POST | `/createUser` | Inscription | |
 | POST | `/login` | Connexion, renvoie un token valable 4 h | |
 | GET | `/user/:id` | Profil public | |
@@ -116,5 +117,8 @@ Les tests tournent sur une base MongoDB en mémoire (`mongodb-memory-server`), s
 
 ## Intégration et déploiement continus
 
-- **CI (GitHub Actions)** : à chaque push et à chaque pull request sur `master`, le workflow `.github/workflows/ci.yml` installe les dépendances avec `npm ci` et lance les tests avec la couverture de code. Le rapport de couverture est disponible dans les artefacts du workflow pendant 7 jours.
+- **CI (GitHub Actions)** : à chaque push et à chaque pull request sur `master`, le workflow `.github/workflows/ci.yml` installe les dépendances avec `npm ci`, vérifie qu'aucune dépendance de production n'a de faille critique (`npm audit`), puis lance les tests avec la couverture de code. Le rapport de couverture est disponible dans les artefacts du workflow pendant 7 jours.
+- **Version de Node** : fixée à 22 par le champ `engines` du `package.json`, lu à la fois par la CI et par Render.
+- **Dépendances** : Dependabot propose chaque semaine des pull requests de mise à jour (npm et GitHub Actions).
+- **Vérification après déploiement** : le workflow `.github/workflows/post-deploy.yml` attend que `/health` renvoie le commit déployé avec une base connectée, puis vérifie quelques routes. Il se lance quand Render signale un déploiement réussi, ou à la main depuis l'onglet Actions (« Run workflow »).
 - **CD (Render)** : l'API est déployée sur Render (commande de démarrage : `npm start`), avec l'auto-deploy réglé sur « After CI Checks Pass ». Un commit n'est donc mis en production que si les tests passent. Les variables d'environnement sont à renseigner dans le tableau de bord Render.
