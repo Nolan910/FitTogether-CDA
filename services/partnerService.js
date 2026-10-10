@@ -84,8 +84,28 @@ const respondToRequest = async (requestId, userId, status) => {
   return PartnerRequest.findById(requestId).populate('from', PUBLIC_USER_FIELDS);
 };
 
+const getRelationship = async (userId, otherUserId) => {
+  if (await arePartners(userId, otherUserId)) {
+    return 'partners';
+  }
+
+  const pending = await PartnerRequest.findOne({
+    status: 'pending',
+    $or: [
+      { from: userId, to: otherUserId },
+      { from: otherUserId, to: userId }
+    ]
+  });
+
+  if (!pending) {
+    return 'none';
+  }
+  return pending.from.equals(userId) ? 'sent' : 'received';
+};
+
 module.exports = {
   arePartners,
+  getRelationship,
   listPartners,
   listPendingRequests,
   sendRequest,

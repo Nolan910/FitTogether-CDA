@@ -15,6 +15,7 @@ router.get('/user/:id', rateLimitMiddleware, checkUserId, userController.getUser
 router.get('/user/:id/posts', checkUserId, postController.listUserPosts);
 router.get('/user/:id/partners', rateLimitMiddleware, checkUserId, partnerController.listPartners);
 router.get('/user/:id/partner-requests', rateLimitMiddleware, verifyToken, isSelf, partnerController.listPendingRequests);
+router.get('/user/:id/relationship', rateLimitMiddleware, verifyToken, checkUserId, partnerController.getRelationship);
 router.post('/user/:id/request-partner', rateLimitMiddleware, verifyToken, checkUserId, partnerController.sendRequest);
 router.put('/user/:id', verifyToken, isSelf, upload.single('profilPic'), updateUserRules, userController.updateUser);
 router.delete('/deleteUser', rateLimitMiddleware, verifyToken, userController.deleteAccount);

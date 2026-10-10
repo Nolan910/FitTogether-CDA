@@ -79,6 +79,7 @@ Une requête traverse les couches dans cet ordre : `route → middlewares → co
 | GET | `/user/:id/posts` | Posts d'un utilisateur | |
 | GET | `/user/:id/partners` | Partenaires d'un utilisateur | |
 | GET | `/user/:id/partner-requests` 🔒 | Demandes reçues en attente | Soi-même |
+| GET | `/user/:id/relationship` 🔒 | Relation avec l'utilisateur `:id` : `partners`, `sent` (demande envoyée), `received` (demande reçue) ou `none` | |
 | POST | `/user/:id/request-partner` 🔒 | Envoyer une demande à l'utilisateur `:id` | |
 | PUT | `/partner-requests/:id` 🔒 | Accepter (`accepted`) ou refuser (`rejected`) une demande | Destinataire |
 | GET | `/posts` | Tous les posts | |

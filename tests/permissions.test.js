@@ -183,6 +183,56 @@ describe('Demandes de partenariat', () => {
   });
 });
 
+describe('Relation avec un autre utilisateur', () => {
+  const getRelationship = (viewer, viewed) => request(app)
+    .get(`/user/${viewed._id}/relationship`)
+    .set(authHeader(viewer));
+
+  test("renvoie 'none' sans demande ni partenariat", async () => {
+    const userA = await createUser();
+    const userB = await createUser();
+
+    const res = await getRelationship(userA, userB);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'none' });
+  });
+
+  test("renvoie 'sent' à l'expéditeur et 'received' au destinataire d'une demande en attente", async () => {
+    const from = await createUser();
+    const to = await createUser();
+    await PartnerRequest.create({ from: from._id, to: to._id });
+
+    expect((await getRelationship(from, to)).body.status).toBe('sent');
+    expect((await getRelationship(to, from)).body.status).toBe('received');
+  });
+
+  test("renvoie 'partners' une fois la demande acceptée", async () => {
+    const userA = await createUser();
+    const userB = await createUser();
+    await makePartners(userA, userB);
+
+    expect((await getRelationship(userA, userB)).body.status).toBe('partners');
+    expect((await getRelationship(userB, userA)).body.status).toBe('partners');
+  });
+
+  test("renvoie 'none' après un refus, pour pouvoir redemander", async () => {
+    const from = await createUser();
+    const to = await createUser();
+    await PartnerRequest.create({ from: from._id, to: to._id, status: 'rejected' });
+
+    expect((await getRelationship(from, to)).body.status).toBe('none');
+  });
+
+  test('demande d’être connecté', async () => {
+    const user = await createUser();
+
+    const res = await request(app).get(`/user/${user._id}/relationship`);
+
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('Messages', () => {
   test("on ne peut pas écrire à quelqu'un qui n'est pas partenaire", async () => {
     const sender = await createUser();

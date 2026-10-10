@@ -25,4 +25,9 @@ const respondToRequest = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listPartners, listPendingRequests, sendRequest, respondToRequest };
+const getRelationship = asyncHandler(async (req, res) => {
+  const status = await partnerService.getRelationship(req.userId, req.params.id);
+  res.json({ status });
+});
+
+module.exports = { listPartners, listPendingRequests, sendRequest, respondToRequest, getRelationship };
