@@ -12,6 +12,7 @@ Front-end : [FitTogether](https://github.com/Nolan910/FitTogether)
 - **MongoDB Atlas** avec **Mongoose**
 - **JWT** pour l'authentification, **bcrypt** pour les mots de passe
 - **Cloudinary** pour les images
+- **Socket.IO** pour les messages en temps réel
 - **Jest**, **Supertest** et **mongodb-memory-server** pour les tests
 
 ## Installation
@@ -45,6 +46,7 @@ Middleware/
   limiter.js          Limitation du nombre de requêtes
   errorHandler.js     Gestion centralisée des erreurs
 config/               Cloudinary et champs utilisateur exposés
+realtime/             Serveur WebSocket et envoi des événements
 utils/                HttpError et asyncHandler
 tests/                Tests d'intégration
 scripts/              Scripts de maintenance

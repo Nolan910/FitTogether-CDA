@@ -1,6 +1,7 @@
 const Message = require('../models/message');
 const HttpError = require('../utils/httpError');
 const { arePartners } = require('./partnerService');
+const { emitToUsers } = require('../realtime/socket');
 
 const getConversation = (userId, partnerId) => Message.find({
   $or: [
@@ -14,7 +15,9 @@ const sendMessage = async (from, to, content) => {
     throw new HttpError(403, "Vous ne pouvez écrire qu'à vos partenaires.");
   }
 
-  return Message.create({ from, to, content });
+  const message = await Message.create({ from, to, content });
+  emitToUsers([from, to], 'message:new', message.toJSON());
+  return message;
 };
 
 module.exports = { getConversation, sendMessage };
