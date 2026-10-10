@@ -10,7 +10,7 @@ cloudinary.config({
 const UPLOAD_OPTIONS = {
   folder: 'FitTogether',
   allowed_formats: ['jpg', 'png', 'jpeg'],
-  transformation: [{ width: 500, height: 500, crop: 'limit' }],
+  transformation: [{ width: 2000, height: 2000, crop: 'limit' }],
 };
 
 const storage = {
