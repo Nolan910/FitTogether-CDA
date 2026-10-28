@@ -41,8 +41,8 @@
     "express-rate-limit": "^7.5.1",
     "express-validator": "^7.3.2",
     "jsonwebtoken": "^9.0.3",
-    "mongoose": "^8.13.2",
-    "multer": "^2.0.1",
+    "mongoose": "^8.24.7",
+    "multer": "^2.5.0",
     "socket.io": "^4.8.4"
   },
   "devDependencies": {
